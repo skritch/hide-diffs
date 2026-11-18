@@ -50,6 +50,25 @@ const startRoot = atom({ plugin: 'hide-diffs', key: 'startRoot' } as const, null
 // Each finished call's counts, for the compact line: a live call row need not carry its result.
 const changes = atom({ plugin: 'hide-diffs', key: 'changes' } as const, {} as CallChanges)
 
+// Packs the band's parts, in order, into rows no wider than `columns`, ' · ' between parts
+// on a row. A part wider than a row gets one to itself and wraps there.
+const SEPARATOR = ' · '
+function packRows<T>(parts: { width: number; part: T }[], columns: number): T[][] {
+  const rows: T[][] = []
+  let used = 0
+  for (const { width, part } of parts) {
+    const last = rows[rows.length - 1]
+    if (last && used + SEPARATOR.length + width <= columns) {
+      last.push(part)
+      used += SEPARATOR.length + width
+    } else {
+      rows.push([part])
+      used = width
+    }
+  }
+  return rows
+}
+
 function countChangedLines(hunks: PatchHunk[] = []): Change {
   let added = 0
   let removed = 0
@@ -310,17 +329,16 @@ export const register: Register = (on, options) => {
     const totals = await read($, tally)
     const { Box, Button, Text } = $.ui.resolve(e)
     const fileCount = totals.files.length
-    const tallyText = fileCount
-      ? ` · ${fileCount} file${fileCount === 1 ? '' : 's'} ${summarize(totals)} this session`
-      : ''
+    const tallyText = fileCount ? `${fileCount} file${fileCount === 1 ? '' : 's'} ${summarize(totals)} this session` : ''
+    const diffsLabel = hiding ? 'Diffs hidden (ctrl+q to show)' : 'Diffs shown (ctrl+q to hide)'
+    const commandsLabel = folding ? 'Commands folded (alt+q to show)' : 'Commands shown (alt+q to fold)'
 
-    return (
-      <Box>
-        <Button
+    const diffsSwitch = (
+      <Button
           action={TOGGLE_ACTION}
           dimColor
           key="toggle-diffs"
-          label={hiding ? 'Diffs hidden (ctrl+q to show)' : 'Diffs shown (ctrl+q to hide)'}
+          label={diffsLabel}
           onPress={async () => {
             const nowHiding = await update($, isHiding, value => !value)
             await $.store.set(STORE_KEY, nowHiding)
@@ -328,12 +346,13 @@ export const register: Register = (on, options) => {
           }}
           plain
         />
-        <Text dimColor> · </Text>
-        <Button
+    )
+    const commandsSwitch = (
+      <Button
           action={COMMANDS_ACTION}
           dimColor
           key="toggle-commands"
-          label={folding ? 'Commands folded (alt+q to show)' : 'Commands shown (alt+q to fold)'}
+          label={commandsLabel}
           onPress={async () => {
             const nowFolding = await update($, isFoldingCommands, value => !value)
             await $.store.set(COMMANDS_STORE_KEY, nowFolding)
@@ -341,7 +360,22 @@ export const register: Register = (on, options) => {
           }}
           plain
         />
-        {tallyText ? <Text dimColor>{tallyText}</Text> : null}
+    )
+    // On a narrow terminal a part that does not fit starts a row of its own, rather than the
+    // tally being squeezed into a tall column beside the switches.
+    const parts = [
+      { width: diffsLabel.length, part: diffsSwitch },
+      { width: commandsLabel.length, part: commandsSwitch },
+      ...(tallyText ? [{ width: [...tallyText].length, part: <Text dimColor>{tallyText}</Text> }] : []),
+    ]
+
+    return (
+      <Box flexDirection="column">
+        {packRows(parts, e.props.bodyColumns).map((row, i) => (
+          <Box key={`band-row-${i}`}>
+            {row.flatMap((part, j) => (j ? [<Text dimColor>{SEPARATOR}</Text>, part] : [part]))}
+          </Box>
+        ))}
       </Box>
     )
   })

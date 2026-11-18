@@ -426,3 +426,38 @@ test('desktop: commands are drawn as the engine draws them', async ($, on) => {
   const row = await $.ui.mount({ plugin: 'hide-diffs', surface: 'desktop', component: 'ToolUse', props })
   expect(await texts(row)).toContain('● Bash(ls)')
 })
+
+test('terminal: a narrow band moves parts that do not fit onto rows of their own', async ($, on) => {
+  on('tool.call', { tool: 'Edit' }, () => ({ result: editOutput('C:/repo/a.ts', 6) }))
+  on('store.set', () => ({ value: undefined }))
+  await $.tool.call({ tool: 'Edit', file_path: 'C:/repo/a.ts', old_string: 'old', new_string: 'new' })
+
+  const rowsAt = async (bodyColumns: number) => {
+    const band = await $.ui.mount({
+      plugin: 'hide-diffs',
+      surface: 'terminal',
+      component: 'AbovePrompt',
+      props: { ...ABOVE_PROMPT, bodyColumns },
+    })
+    const rows: string[] = []
+    for (let row; (row = await band.find({ key: `band-row-${rows.length}` })); ) rows.push(row.text)
+    await band.unmount()
+    return rows
+  }
+
+  const diffs = 'Diffs hidden (ctrl+q to show)' // 29 columns
+  const commands = 'Commands folded (alt+q to show)' // 31
+  const files = '1 file (+6 −1) this session' // 27
+  // [width, rows]: ' · ' between two parts on a row takes 3 columns.
+  const cases: [number, string[]][] = [
+    [120, [`${diffs} · ${commands} · ${files}`]],
+    [93, [`${diffs} · ${commands} · ${files}`]],
+    [92, [`${diffs} · ${commands}`, files]],
+    [63, [`${diffs} · ${commands}`, files]],
+    [62, [diffs, `${commands} · ${files}`]],
+    [61, [diffs, `${commands} · ${files}`]],
+    [60, [diffs, commands, files]],
+    [10, [diffs, commands, files]],
+  ]
+  for (const [width, rows] of cases) expect([width, await rowsAt(width)]).toEqual([width, rows])
+})
