@@ -346,11 +346,19 @@ export const register: Register = (on, options) => {
     )
   })
 
-  // The transcript folds runs of edits into one line; while diffs are shown, unfold
-  // those runs so ctrl+q visibly brings every diff back.
+  // The transcript folds runs of calls into one line; while diffs are shown, unfold runs
+  // with edits so ctrl+q visibly brings every diff back, and while commands are shown,
+  // unfold runs with shell calls (`Ran 2 shell commands`) so alt+q shows each one.
   on('ui.render', { component: 'ToolGroup' }, async ($, e, next) => {
-    if (e.props.isExpanded || !e.props.calls.some(call => FILE_TOOLS.has(call.tool))) return next(e)
-    if (!(await read($, isHiding))) return next({ ...e, props: { ...e.props, isExpanded: true } })
+    const hasFiles = e.props.calls.some(call => FILE_TOOLS.has(call.tool))
+    const hasShell = e.props.calls.some(call => SHELL_TOOLS.has(call.tool))
+    if (e.props.isExpanded || (!hasFiles && !hasShell)) return next(e)
+    // Unfold while a switch says to show what the run holds; alt+q shows read-only commands too.
+    // An unfolded run draws its edits' diffs inline, so a run with edits unfolds only while diffs show.
+    const showFiles = hasFiles && !(await read($, isHiding))
+    const showShell = hasShell && !hasFiles && !(await read($, isFoldingCommands))
+    if (showFiles || showShell) return next({ ...e, props: { ...e.props, isExpanded: true } })
+    if (!hasFiles) return next(e)
 
     // Folded: lay the icon over the line's blank indent, so the engine's text stays where it is.
     const row = await next(e)

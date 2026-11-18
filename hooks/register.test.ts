@@ -426,3 +426,50 @@ test('desktop: commands are drawn as the engine draws them', async ($, on) => {
   const row = await $.ui.mount({ plugin: 'hide-diffs', surface: 'desktop', component: 'ToolUse', props })
   expect(await texts(row)).toContain('● Bash(ls)')
 })
+
+for (const surface of SURFACES) {
+  test(`${surface}: showing commands unfolds a run with shell calls and no edits`, async ($, on) => {
+    on('store.set', () => ({ value: undefined }))
+    on('ui.render', { component: 'ToolGroup' }, ($, e) =>
+      h($.ui.resolve(e).Text, {}, e.props.isExpanded ? 'expanded' : 'folded') as RenderElement,
+    )
+    const call = (tool: string) => ({ tool, input: {}, isRunning: false, isErrored: false, isInterrupted: false })
+    const groups = {
+      shell: [call('Bash')],
+      powershell: [call('PowerShell'), call('Read')],
+      reads: [call('Read'), call('Grep')],
+      edits: [call('Edit'), call('Bash')],
+    }
+    const mounted = Object.fromEntries(
+      await Promise.all(
+        Object.entries(groups).map(async ([name, calls]) => [
+          name,
+          await $.ui.mount({
+            plugin: 'hide-diffs',
+            surface,
+            component: 'ToolGroup',
+            props: { calls, isActive: false, isExpanded: false },
+          }),
+        ]),
+      ),
+    )
+    const state = async () =>
+      Object.fromEntries(
+        await Promise.all(
+          Object.entries(mounted).map(async ([name, ui]) => [name, (await ui.find({ text: 'expanded' })) ? 'expanded' : 'folded']),
+        ),
+      )
+
+    // Diffs hidden, commands folded: everything stays folded.
+    expect(await state()).toEqual({ shell: 'folded', powershell: 'folded', reads: 'folded', edits: 'folded' })
+
+    const band = await $.ui.mount({ plugin: 'hide-diffs', surface, component: 'AbovePrompt', props: ABOVE_PROMPT })
+    // A run with edits stays folded: unfolding it would draw its diffs while they are hidden.
+    await band.press({ key: 'toggle-commands' })
+    expect(await state()).toEqual({ shell: 'expanded', powershell: 'expanded', reads: 'folded', edits: 'folded' })
+
+    await band.press({ key: 'toggle-commands' })
+    await band.press({ key: 'toggle-diffs' })
+    expect(await state()).toEqual({ shell: 'folded', powershell: 'folded', reads: 'folded', edits: 'expanded' })
+  })
+}
